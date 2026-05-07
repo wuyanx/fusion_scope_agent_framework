@@ -1,18 +1,10 @@
 # Fusion Scope Agent Framework
 
-This project generalizes the first Ascend 910B fusion-scope microbenchmark into a scenario-driven, agent-friendly framework.
+This project is a scenario-driven benchmark framework for studying how fusion scope affects execution time on Ascend 910B. It focuses on reproducible motif-level microbenchmarks: each scenario describes one operator DAG motif, a definition of `fusion_group_size`, and the runtime configuration needed to generate execution-time curves.
 
-The original validated line was:
+The first-stage metric is execution time only. The framework is intentionally scoped to motif-level experiments rather than profiler analysis, roofline modeling, or full compiler fusion strategy exploration.
 
-- hardware: Ascend 910B
-- scenario: multi-branch elementwise + branch-wise softmax aggregation
-- metric: execution time only
-- variable: `fusion_group_size`
-- result: execution time monotonically decreased for `B=32`, with smaller marginal gain after `G=8`
-
-This framework keeps that line reproducible and adds a generic path for adding more motifs.
-
-## Core idea
+## Usage
 
 Each fusion scenario is described by a human-readable Markdown file with TOML front matter:
 
@@ -34,126 +26,100 @@ repeat = 100
 trials = 5
 ```
 
-An agent or user can then run:
+The Markdown body records the human-facing definition of the motif: the DAG shape, where it appears in LLM workloads, what `fusion_group_size` means for that scenario, and what curve shape is expected.
 
-```bash
-python tools/run_scenario.py \
-  --scenario scenarios/02_branch_fan_in_aggregation.md \
-  --overwrite \
-  --dry-run
+If `scenarios/` already contains the scenario you want to test, you can use that file directly. If you want to change an experiment or add a new motif, edit an existing scenario file or add a new `scenarios/XX_name.md` following the same format.
+
+Then tell the agent:
+
+```text
+Please test scenarios/XX_name.md
 ```
 
-or on the Ascend server:
+From the user's perspective, the scenario Markdown file is the only required input. The agent handles the rest:
 
-```bash
-/root/miniconda3/envs/tlx/bin/python tools/run_scenario.py \
-  --scenario scenarios/02_branch_fan_in_aggregation.md \
-  --overwrite \
-  --check \
-  --run \
-  --plot \
-  --device npu:0
-```
+1. Read the scenario and parse the TOML front matter.
+2. Classify the scenario:
+   - if the scenario already exists and has not changed, reuse the existing generated benchmark;
+   - if the scenario is new or the Markdown file changed, materialize a fresh generated benchmark;
+   - if the scenario uses a new `benchmark_kind`, create the required generator under `generators/`, register it, and then materialize the benchmark.
+3. Run local dry-run checks when appropriate.
+4. Run correctness checks and benchmarks on the Ascend server.
+5. Generate CSV output and execution-time plots under `generated/<scenario_id>/results/<timestamp>/`.
+6. Summarize the environment, scenario config, execution-time table, best `fusion_group_size`, and curve shape.
 
-The command will:
+The user does not need to manually run framework commands, edit `generators/__init__.py`, or manage generated benchmark scripts. If a new scenario does not describe the DAG or math clearly enough to implement safely, the agent should ask one concise clarification before generating code.
 
-1. read the scenario file;
-2. materialize a generated benchmark project under `generated/<scenario_id>/`;
-3. run correctness check if requested;
-4. run benchmark if requested;
-5. generate plots if requested.
+The agent-facing scenario states are:
 
-## Current supported scenarios
-
-| Scenario file | Motif | Fusion scope definition |
-|---|---|---|
-| `scenarios/01_linear_elementwise_chain.md` | Linear elementwise chain | number of consecutive elementwise ops fused into one kernel |
-| `scenarios/02_branch_fan_in_aggregation.md` | Branch fan-in aggregation | number of branches fused into one group kernel |
+- `existing_unchanged`: generated scripts are up to date; run the existing generated benchmark.
+- `existing_modified`: the scenario file changed; regenerate generated scripts before running.
+- `new_scenario_existing_benchmark`: the `benchmark_kind` is supported, but this scenario has not been materialized yet; generate scripts before running.
+- `new_benchmark_kind`: the scenario needs a new generator and registry entry; the agent creates those framework files, then runs the benchmark workflow.
 
 ## Directory layout
 
 ```text
 .
-├── README.md
-├── AGENTS.md
-├── CODEX_HANDOFF_PROMPT.md
-├── scenarios/
+├── README.md                         # Project overview and expected workflow.
+├── AGENTS.md                         # Operating rules and hard constraints for agents.
+├── requirements.txt                  # Lightweight local requirements; server uses its Ascend environment.
+├── scenarios/                        # Scenario specs: Markdown + TOML front matter.
 │   ├── 01_linear_elementwise_chain.md
 │   └── 02_branch_fan_in_aggregation.md
-├── fusion_scope_core/
+├── fusion_scope_core/                # Shared parser and file utilities.
 │   ├── scenario.py
 │   └── file_utils.py
-├── generators/
+├── generators/                       # Benchmark materializers, one per benchmark_kind.
+│   ├── __init__.py                   # Registry from benchmark_kind to generator.
+│   ├── common.py                     # Shared generated project templates.
 │   ├── linear_elementwise_chain.py
-│   ├── branch_fan_in_aggregation.py
-│   └── common.py
-├── tools/
+│   └── branch_fan_in_aggregation.py
+├── tools/                            # Local and remote workflow entry points.
+│   ├── agent_run_scenario.py
 │   ├── materialize_scenario.py
 │   ├── run_scenario.py
 │   ├── remote_run_scenario.py
 │   ├── plot_results.py
 │   └── check_env.py
-├── scripts/
+├── scripts/                          # Convenience scripts for known server setups.
 │   └── connect_910b3.py
-└── skills/
-    └── fusion_scope_framework/
-        └── SKILL.md
+├── skills/                           # Agent-side workflow guidance.
+│   └── fusion_scope_framework/
+│       └── SKILL.md
+└── generated/                        # Generated benchmark projects and run artifacts.
+    └── <scenario_id>/
+        ├── scenario.md               # Copy of the source scenario used for this benchmark.
+        ├── README.md                 # Generated benchmark notes.
+        ├── README_GENERATED.md       # Compatibility copy of the generated README.
+        ├── run_benchmark.py          # Self-contained correctness and benchmark runner.
+        ├── plot_results.py           # Plot helper for the generated CSV.
+        ├── fusion_benchmark/         # Generated benchmark package.
+        │   ├── __init__.py
+        │   ├── device.py             # Device resolution, synchronization, timing helpers.
+        │   ├── kernels.py            # Triton kernels and FusionPlan implementation.
+        │   └── torch_reference.py    # PyTorch reference for correctness checks.
+        └── results/                  # Per-run CSV output and execution-time plots.
+            └── <timestamp>/          # Format: YYYYMMDD_HHMMSS_microseconds.
+                ├── <scenario>.csv
+                ├── fusion_scope_execution_time.png
+                └── fusion_scope_speedup.png
 ```
 
-## Local dry run
+Generated benchmark directories are self-contained enough to inspect, copy, and run on the Ascend server. They are artifacts of the scenario workflow, not hand-maintained source files.
 
-Local machine may not have Ascend/Triton. Use dry run to test parsing and code generation:
+## Environment
 
-```bash
-python tools/run_scenario.py \
-  --scenario scenarios/01_linear_elementwise_chain.md \
-  --overwrite \
-  --dry-run
-```
-
-```bash
-python tools/run_scenario.py \
-  --scenario scenarios/02_branch_fan_in_aggregation.md \
-  --overwrite \
-  --dry-run
-```
-
-## Server run
-
-If your `~/.ssh/config` already has a `910B3` alias:
-
-```bash
-python tools/remote_run_scenario.py \
-  --host 910B3 \
-  --remote-root /home/wyx/fusion_scope_agent_framework \
-  --python /root/miniconda3/envs/tlx/bin/python \
-  --scenario scenarios/02_branch_fan_in_aggregation.md \
-  --overwrite \
-  --check \
-  --run \
-  --plot
-```
-
-This uses `rsync` and `ssh`, so it is intentionally simple and compatible with normal agent workflows.
-
-## Generated benchmark structure
-
-For each scenario, the framework creates:
+The usual remote defaults live in `tools/remote_run_scenario.py`:
 
 ```text
-generated/<scenario_id>/
-├── scenario.md
-├── README_GENERATED.md
-├── run_benchmark.py
-├── plot_results.py
-└── fusion_benchmark/
-    ├── __init__.py
-    ├── device.py
-    ├── kernels.py
-    └── torch_reference.py
+host = 910B3
+remote_root = /home/wyx/fusion_scope_agent_framework
+python = /root/miniconda3/envs/tlx/bin/python
+device = npu:0
 ```
 
-The generated benchmark can be copied and run independently.
+When running directly on the server, the Python executable and device come from the command the agent runs. The expected server stack is the Ascend environment with `torch`, `torch_npu`, Triton, and NPU access available.
 
 ## Important Ascend compatibility note
 
@@ -165,21 +131,3 @@ check_n % block == 0
 ```
 
 This is intentional for the current environment. Do not remove this constraint unless the server stack is upgraded and the kernels are revalidated.
-
-## Extension path
-
-To add a new motif:
-
-1. Add a new `scenarios/XX_name.md` file with TOML front matter.
-2. Add a generator under `generators/<benchmark_kind>.py`.
-3. Register it in `generators/__init__.py`.
-4. Run `python tools/run_scenario.py --scenario ... --dry-run`.
-5. Run correctness check and benchmark on Ascend.
-
-First-stage planned motif expansion after these two:
-
-- GLU / SwiGLU gating
-- Elementwise + layout transform
-- Reduction + elementwise post-processing
-- Cascaded reduction
-- Quant / dequant / cast interleaving
