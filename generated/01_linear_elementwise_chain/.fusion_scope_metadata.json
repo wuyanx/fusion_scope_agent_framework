@@ -1,0 +1,31 @@
+{
+  "benchmark_kind": "linear_elementwise_chain",
+  "config": {
+    "benchmark_kind": "linear_elementwise_chain",
+    "block": 256,
+    "check_n": 4096,
+    "default_N": 4194304,
+    "default_ops": 32,
+    "expected_curve": "execution time decreases first, then enters a plateau",
+    "fusion_scopes": [
+      1,
+      2,
+      4,
+      8,
+      16,
+      32
+    ],
+    "hardware": "Ascend 910B",
+    "id": "01_linear_elementwise_chain",
+    "name": "Linear Elementwise Chain",
+    "output_csv": "results/linear_elementwise_chain.csv",
+    "repeat": 100,
+    "trials": 5,
+    "warmup": 20
+  },
+  "metadata_version": 1,
+  "scenario_id": "01_linear_elementwise_chain",
+  "scenario_name": "Linear Elementwise Chain",
+  "scenario_path": "/Users/gohikonishi/Desktop/HW/op_fusion/fusion_curve/fusion_scope_agent_framework/scenarios/01_linear_elementwise_chain.md",
+  "scenario_sha256": "0791beae8a3deb6ba55384c5798fd3f907b060aed3899f82f85eae3b43a84caf"
+}

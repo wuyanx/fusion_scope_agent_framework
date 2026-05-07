@@ -1,0 +1,31 @@
+{
+  "benchmark_kind": "branch_fan_in_aggregation",
+  "config": {
+    "benchmark_kind": "branch_fan_in_aggregation",
+    "block": 256,
+    "check_n": 4096,
+    "default_B": 32,
+    "default_N": 4194304,
+    "expected_curve": "execution time decreases first, then plateaus, and may rebound under stress settings",
+    "fusion_scopes": [
+      1,
+      2,
+      4,
+      8,
+      16,
+      32
+    ],
+    "hardware": "Ascend 910B",
+    "id": "02_branch_fan_in_aggregation",
+    "name": "Branch Fan-in Aggregation",
+    "output_csv": "results/branch_fan_in_aggregation.csv",
+    "repeat": 100,
+    "trials": 5,
+    "warmup": 20
+  },
+  "metadata_version": 1,
+  "scenario_id": "02_branch_fan_in_aggregation",
+  "scenario_name": "Branch Fan-in Aggregation",
+  "scenario_path": "/Users/gohikonishi/Desktop/HW/op_fusion/fusion_curve/fusion_scope_agent_framework/scenarios/02_branch_fan_in_aggregation.md",
+  "scenario_sha256": "1748fce14583ead747a94361b77e1d249f7a5b596c3ded944420c68b19330f2d"
+}
