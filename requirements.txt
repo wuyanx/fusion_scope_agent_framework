@@ -1,0 +1,5 @@
+# Python 3.11+ recommended.
+# On Ascend server, use the existing torch/torch_npu/triton environment.
+tomli; python_version < "3.11"
+matplotlib
+pandas
