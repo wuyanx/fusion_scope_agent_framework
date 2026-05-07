@@ -23,6 +23,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--plot", action="store_true")
     p.add_argument("--overwrite", action="store_true")
     p.add_argument("--device", default="npu:0")
+    p.add_argument("--run-id", default=None, help="Result subdirectory name on the remote run.")
     p.add_argument("--dry-run", action="store_true")
     return p
 
@@ -46,6 +47,8 @@ def main() -> None:
         flags.append("--run")
     if args.plot:
         flags.append("--plot")
+    if args.run_id:
+        flags.extend(["--run-id", shlex.quote(args.run_id)])
     if not (args.check or args.run):
         flags.append("--dry-run")
 

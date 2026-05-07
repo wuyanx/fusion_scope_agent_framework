@@ -6,6 +6,7 @@ from textwrap import dedent
 
 from fusion_scope_core.file_utils import write_text
 from fusion_scope_core.scenario import Scenario
+from fusion_scope_core.scenario_status import write_generated_metadata
 
 
 def device_py() -> str:
@@ -331,7 +332,9 @@ def write_common_project_files(out_dir: Path, scenario: Scenario, kind: str) -> 
     ## Correctness check and benchmark
 
     Use `tools/run_scenario.py` from the framework root, or run this generated project directly.
+    Agent-managed runs write CSV and plots under `results/<timestamp>/`.
     The direct command is recorded in the parent framework output.
     ''').lstrip()
     write_text(out_dir / "README.md", readme)
     write_text(out_dir / "README_GENERATED.md", readme)
+    write_generated_metadata(out_dir, scenario)

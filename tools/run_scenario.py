@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
 from pathlib import Path
 import subprocess
 import sys
@@ -11,6 +12,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from fusion_scope_core.scenario import comma_join, load_scenario
 from fusion_scope_core.file_utils import reset_dir
+from fusion_scope_core.scenario_status import classify_scenario
 from generators import REGISTRY
 
 
@@ -25,12 +27,36 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--plot", action="store_true", help="Plot output CSV after full benchmark.")
     p.add_argument("--python", default=sys.executable, help="Python executable for generated benchmark.")
     p.add_argument("--device", default=None, help="Device override, e.g. npu:0.")
+    p.add_argument("--run-id", default=None, help="Result subdirectory name. Defaults to a timestamp when --run is used.")
     p.add_argument("--extra", nargs=argparse.REMAINDER, help="Extra args appended to generated run_benchmark.py")
     return p
 
 
-def build_generated_command(scenario, generated_dir: Path, dry_run: bool, check: bool, run: bool, device: str | None, extra: list[str] | None) -> list[str]:
+def default_run_id() -> str:
+    return datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+
+
+def output_csv_for_run(scenario, run_id: str | None) -> Path:
     cfg = scenario.config
+    configured = Path(cfg.get("output_csv", "results/result.csv"))
+    if not run_id:
+        return configured
+    result_root = configured.parent if configured.parent != Path("") else Path("results")
+    return result_root / run_id / configured.name
+
+
+def build_generated_command(
+    scenario,
+    generated_dir: Path,
+    dry_run: bool,
+    check: bool,
+    run: bool,
+    device: str | None,
+    extra: list[str] | None,
+    output_csv: Path | None = None,
+) -> list[str]:
+    cfg = scenario.config
+    out = output_csv or output_csv_for_run(scenario, None)
     cmd = [
         str(generated_dir / "run_benchmark.py"),
         "--N", str(cfg["default_N"]),
@@ -39,7 +65,7 @@ def build_generated_command(scenario, generated_dir: Path, dry_run: bool, check:
         "--warmup", str(cfg["warmup"]),
         "--repeat", str(cfg["repeat"]),
         "--trials", str(cfg["trials"]),
-        "--out", str(cfg.get("output_csv", "results/result.csv")),
+        "--out", str(out),
     ]
     if scenario.benchmark_kind == "branch_fan_in_aggregation":
         cmd.extend(["--B", str(cfg.get("default_B", cfg.get("problem_size", 32)))])
@@ -64,13 +90,21 @@ def build_generated_command(scenario, generated_dir: Path, dry_run: bool, check:
 def main() -> None:
     args = build_arg_parser().parse_args()
     scenario = load_scenario(args.scenario)
+    generated_dir = (args.out_root / scenario.scenario_id).resolve()
+    run_id = args.run_id or (default_run_id() if args.run else None)
+    output_csv = output_csv_for_run(scenario, run_id)
+    if run_id:
+        print(f"[run] run_id={run_id}", flush=True)
+        print(f"[run] output_csv={output_csv}", flush=True)
+    status = classify_scenario(scenario, generated_dir, REGISTRY.keys())
+    print(f"[scenario] state={status.state}", flush=True)
+    print(f"[scenario] action={status.message}", flush=True)
     if scenario.benchmark_kind not in REGISTRY:
         raise ValueError(f"Unknown benchmark_kind={scenario.benchmark_kind}. Available: {sorted(REGISTRY)}")
 
-    generated_dir = (args.out_root / scenario.scenario_id).resolve()
     reset_dir(generated_dir, overwrite=args.overwrite)
     REGISTRY[scenario.benchmark_kind](scenario, generated_dir)
-    print(f"[done] materialized scenario {scenario.scenario_id} -> {generated_dir}")
+    print(f"[done] materialized scenario {scenario.scenario_id} -> {generated_dir}", flush=True)
 
     should_execute = args.dry_run or args.check or args.run
     if should_execute:
@@ -82,16 +116,15 @@ def main() -> None:
             run=args.run,
             device=args.device,
             extra=args.extra,
+            output_csv=output_csv,
         )
-        print("[exec]", " ".join(cmd))
+        print("[exec]", " ".join(cmd), flush=True)
         subprocess.run(cmd, cwd=generated_dir, check=True)
 
     if args.plot:
-        cfg = scenario.config
-        out_csv = Path(cfg.get("output_csv", "results/result.csv"))
-        out_dir = out_csv.parent if out_csv.parent != Path("") else Path("results")
-        cmd = [args.python, str(generated_dir / "plot_results.py"), "--csv", str(out_csv), "--out-dir", str(out_dir)]
-        print("[exec]", " ".join(cmd))
+        out_dir = output_csv.parent if output_csv.parent != Path("") else Path("results")
+        cmd = [args.python, str(generated_dir / "plot_results.py"), "--csv", str(output_csv), "--out-dir", str(out_dir)]
+        print("[exec]", " ".join(cmd), flush=True)
         subprocess.run(cmd, cwd=generated_dir, check=True)
 
 
